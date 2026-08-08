@@ -2,7 +2,7 @@
 
 Entry for the Kaggle competition **Solana Sniper Bot Reverse-Engineering**. The goal is to reconstruct the deployer-selection strategy of an anonymous, high-performing Solana memecoin sniper bot from raw on-chain deploy and wallet-activity data, then build a replica strategy and evaluate whether it could match the bot's real performance.
 
-The full pipeline lives in [`solana_sniper_bot_analysis.ipynb`](./solana_sniper_bot_analysis.ipynb) and is organised into three parts. This README is a technical summary; the full narrative, including the hypothesized deployer-selection rules, methodology justification, and stated limitations, is in the [Kaggle Writeup](https://www.kaggle.com/competitions/solana-sniper-bot-reverse-engineering/writeups).
+The full pipeline lives in [`solana_sniper_bot_analysis.ipynb`](./solana_sniper_bot_analysis.ipynb) and is organised into three parts. This README is a technical summary; the full narrative, including the hypothesised deployer-selection rules, methodology justification, and stated limitations, is in the [Kaggle Writeup](https://www.kaggle.com/competitions/solana-sniper-bot-reverse-engineering/writeups).
 
 ## Part 1 — Behavioural analysis
 
@@ -11,7 +11,7 @@ Descriptive analysis of the bot's actual trading behaviour, using its real buy/s
 - 16,192 buys, 70,812 sells, 2 burns across 16,168 unique tokens
 - Entry size (USD): mean 263.25, median 183.72, std 232.51
 - Median hold time: 14 slots (a Solana slot targets ~400ms under normal network conditions [1])
-- Hit rate on realized trades: 78.74%, avg win 122.63 USD, avg loss -21.09 USD (~6:1 win/loss ratio)
+- Hit rate on realised trades: 78.74%, avg win 122.63 USD, avg loss -21.09 USD (~6:1 win/loss ratio)
 - The large majority of exited positions use multi-tranche (staged) selling rather than a single exit
 
 ## Part 2 — t_decision-safe feature engineering + interpretable classifier
@@ -24,7 +24,7 @@ Builds a classifier that predicts, at the moment a token is deployed, whether th
 - Trained on a **time-based** 80/20 split (76,741 train / 19,186 test rows) — never a random split, to avoid look-ahead bias. The 80/20 ratio is a standard default; the deliberate choice is the chronological ordering, which prevents the model training on events that occurred after its test events
 - Test-set performance: PR-AUC 0.7362, precision 0.7290, recall 0.5826, F1 0.6476
 - **Population-reweighted evaluation**: the test set's negative class is subsampled to 80,000 events (~25% positive rate), not the true population rate. Recall and false-positive rate are invariant to this subsampling, so both can be reweighted to the true population base rate (0.314%, across all 5,076,421 deploy events) without rescoring every candidate. At that base rate: precision falls to **2.48%** (recall unchanged at 58.3%, F1 4.76%). Pointed at every deploy event on Solana rather than this curated set, roughly 1 in 40 flagged tokens would be a genuine match, not roughly 3 in 4 — the expected effect of subsampling, reported so balanced-set precision is not mistaken for real-world precision
-- Interpretability via SHAP (`TreeExplainer`) [4], based on the Shapley value from cooperative game theory [5]; top features are translated into plain-language rules in the notebook
+- Interpretability via SHAP (`TreeExplainer`) [4], based on the Shapley value from cooperative game theory [5]; top features are translated into plain-language rules in the notebook. The top-10 features by mean |SHAP value| are dominated by `cum_n_distinct_tokens` and `launchpad_platform`, consistent with the deployer-track-record hypothesis
 - **Leakage audit**: since positives are sourced from the Kaggle-mirrored data and negatives from an externally downloaded file, the two could in principle use inconsistent timestamp encoding (a bug found in at least one other team's early attempt at this problem). Comparing raw schemas, timestamp ranges, and units between the two sources found no mismatch — both use the same encoding and cover the same period
 
 ## Part 3 — Replica strategy backtest
@@ -41,10 +41,22 @@ Simulates "buy whatever the model would buy" and compares it against the bot's r
 | Max drawdown (USD) | -361.79 | -422.90 |
 
 - Coverage: the replica strategy captures 58.3% of the bot's actual buy volume (recall)
-- 1,038 of 3,830 replica-strategy buys are false positives relative to the bot's real behaviour — for these tokens the bot never traded, so ground-truth P&L is unknowable. This is an explicit, honest limitation of the backtest, not something papered over
-- An entry-delay sensitivity check (proxying a 1–2 slot delayed entry using 1st vs 2nd buy price on multi-tranche tokens) found only 8 of 2,792 true-positive tokens had a usable second buy transaction — too small a sample to draw a firm conclusion, so the result (delayed entry appearing to hurt hit rate and P&L in this thin sample) is reported as a directional signal only, not a finding
+- 1,038 of 3,830 replica-strategy buys are false positives relative to the bot's real behaviour — for these tokens the bot never traded, so no ground-truth P&L exists directly. The independent price validation below sources a sample of these prices separately
+- An entry-delay sensitivity check (proxying a 1–2 slot delayed entry using 1st vs 2nd buy price on multi-tranche tokens) found only 8 of 2,792 true-positive tokens had a usable second buy transaction — too small a sample to draw a firm conclusion on its own. The independent price validation below extends this check to a much larger sample
 - **Executability stress test**: the figures above ignore transaction costs. The bot's own recorded fees show why this matters — winning the zero-block race requires a competitive priority fee, so median buy-side gas is $7.62, versus $0.08 median on (non-time-competitive) sells. Applying this $7.71 round-trip cost to every replica-strategy trade drops hit rate from 81.7% to **67.7%** (a meaningful share of recorded wins are thin margins a realistic fee erases), while total P&L is more resilient, falling from $255,253 to **$233,734** (~8%). Aggregate profitability survives the stress test; the headline hit rate does not fully reflect how fragile individual trades are
-- Next step for the remaining open items above: independently source Solana price data for the false-positive tokens and for the full true-positive set, rather than relying on the bot's own second buy as a proxy. The competition rules explicitly permit querying public Solana on-chain data as External Data, provided it is not used to alter the decision-time features in Parts 2–3 [6]
+
+### Independent price validation
+
+An independent, on-chain-derived price source (GeckoTerminal's free public API, no key required) was queried for a bounded sample of tokens, permitted under the competition's Section 2.6 External Data allowance. Coverage is partial: many of these tokens are pump.fun bonding-curve launches that never migrated to an indexed AMM pool, so GeckoTerminal has no data for a meaningful share of them. Sample size (250 per group) and 1-minute candle granularity were bounded by the public API's 30 requests/minute rate limit.
+
+| Check | Sampled | Priced | Result |
+|---|---|---|---|
+| False positives: price 5 min after deploy | 250 of 1,038 | 240 (96.0%) | 13.33% would have risen (median 0.0%, mean −4.09%) |
+| True positives: price after a 1 min delay | 250 of 2,784 | 239 (95.6%) | 28.03% rose, i.e. cost more to enter late (median −0.02%, mean +0.48%) |
+
+- Only 13.33% of the sampled false positives showed any price rise in the 5 minutes after deployment, and the average change was negative — suggesting the bot's non-buys were mostly correctly skipped rather than a large pool of missed profit
+- The extended 250-token entry-delay sample shows a 1-minute delayed entry costs more only 28.03% of the time, well below the 62.5% suggested by the original 8-token proxy (note the two checks use different delay windows: the proxy used the gap to the bot's actual second buy, this uses a fixed 1-minute window). The larger, independently sourced sample points to entry timing being closer to a coin flip than the small proxy implied
+- Remaining next step: pricing the rest of the false-positive and true-positive sets beyond these 250-token samples, extendable with the same method given more time against the public API's rate limit
 
 ## Repository contents
 
@@ -68,7 +80,7 @@ To reproduce:
 
 ### Dependencies
 
-Everything used is preinstalled in Kaggle's standard Python notebook image: `pandas`, `numpy`, `pyarrow`, `lightgbm`, `shap`, `scikit-learn`, `matplotlib`.
+Everything used is preinstalled in Kaggle's standard Python notebook image: `pandas`, `numpy`, `pyarrow`, `lightgbm`, `shap`, `scikit-learn`, `matplotlib`. Independent price validation additionally uses `requests` (also preinstalled) to query GeckoTerminal's public API.
 
 ## Sources
 
