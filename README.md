@@ -14,6 +14,10 @@ Descriptive analysis of the bot's actual trading behaviour, using its real buy/s
 - Hit rate on realised trades: 78.74%, avg win 122.63 USD, avg loss -21.09 USD (~6:1 win/loss ratio)
 - The large majority of exited positions use multi-tranche (staged) selling rather than a single exit
 
+![Entry size distribution](Part%20One%2C%20Figure%20One%3A%20Entry%20Size%20Distribution.png)
+![Latency to first buy](Part%20One%2C%20Figure%20Two%3A%20Latency%20to%20First%20Buypng)
+![Realised profit and loss distribution](Part%20One%2C%20Figure%20Three%3A%20Realised%20Profit%20and%20Loss%20Distributionpng)
+
 ## Part 2 — t_decision-safe feature engineering + interpretable classifier
 
 Builds a classifier that predicts, at the moment a token is deployed, whether the bot will buy it — using **only information available strictly before that decision**.
@@ -27,6 +31,8 @@ Builds a classifier that predicts, at the moment a token is deployed, whether th
 - Interpretability via SHAP (`TreeExplainer`) [4], based on the Shapley value from cooperative game theory [5]; top features are translated into plain-language rules in the notebook. The top-10 features by mean |SHAP value| are dominated by `cum_n_distinct_tokens` and `launchpad_platform`, consistent with the deployer-track-record hypothesis
 - **Leakage audit**: since positives are sourced from the Kaggle-mirrored data and negatives from an externally downloaded file, the two could in principle use inconsistent timestamp encoding (a bug found in at least one other team's early attempt at this problem). Comparing raw schemas, timestamp ranges, and units between the two sources found no mismatch — both use the same encoding and cover the same period
 
+![SHAP feature importance](Part%20Two%2C%20Figure%20One%3A%20SHAP%20Feature%20Importancepng)
+
 ## Part 3 — Replica strategy backtest
 
 Simulates "buy whatever the model would buy" and compares it against the bot's real trades:
@@ -39,6 +45,8 @@ Simulates "buy whatever the model would buy" and compares it against the bot's r
 | Avg loss (USD) | -17.80 | -19.30 |
 | Total P&L (USD) | 361,338.9 | 255,253.3 |
 | Max drawdown (USD) | -361.79 | -422.90 |
+
+![Equity curve, bot actual versus replica strategy](Part%20Three%2C%20Figure%20One%3A%20Equity%20Curve%2C%20Bot%20Actual%20Versus%20Replica%20Strategypng)
 
 - Coverage: the replica strategy captures 58.3% of the bot's actual buy volume (recall)
 - 1,038 of 3,830 replica-strategy buys are false positives relative to the bot's real behaviour — for these tokens the bot never traded, so no ground-truth P&L exists directly. The independent price validation below sources a sample of these prices separately
